@@ -63,13 +63,13 @@ summary(trainingData[,523:529])
 summary(validationData[,523:529])
 
 #create new column for location in training set
-trainingData$Location <- (trainingData$SPACEID*100 +trainingData$FLOOR*10 +trainingData$BUILDINGID)
+#trainingData$Location <- (trainingData$SPACEID*100 +trainingData$FLOOR*10 +trainingData$BUILDINGID)
 
 #create new column for location in validaiton set
-validationData$Location <- (validationData$SPACEID*100 +validationData$FLOOR*10 +validationData$BUILDINGID)
+#validationData$Location <- (validationData$SPACEID*100 +validationData$FLOOR*10 +validationData$BUILDINGID)
 
-trainingData$Location<-(stringr::str_pad(trainingData$Location, 5, pad = "0"))
-validationData$Location<-(stringr::str_pad(validationData$Location, 5, pad = "0"))
+#trainingData$Location<-(stringr::str_pad(trainingData$Location, 5, pad = "0"))
+#validationData$Location<-(stringr::str_pad(validationData$Location, 5, pad = "0"))
 
 
 #find means of the WAPs
@@ -84,6 +84,23 @@ trainingDataMEAN <- as.data.frame(trainingDataMEAN)
 
 trainingData1<-trainingData[,-c(3,4,92,93,94,95,152,158,159,160,215,217,226,227,238,239,240,241,242,243,244,245,246,247,254,293,296,301,303,304,307,333,349,353,360,365,416,419,423,429,433,438,441,442,444,445,451,458,482,485,487,488,491,497,520)]
 
+#Empty the no WAPs means (location, phoneID...)
+#means[1:11]<-0
+#means<-as.data.frame(means)
+
+#can also be done with the function apply
+#means<-apply(training[11:530], 2, mean)
+#means<-as.data.frame(means)
+
+#delete all the WAPs with a mean of =100
+#indices<-c()
+#for (i in 11:530){
+# if(means[i,]==100){
+#   indices[i]<- i
+# }
+#}
+#training2<- training[is.na(indices)]
+
 #find phones with weak signals
 phones <- split(trainingData1, trainingData1$PHONEID)
 
@@ -95,23 +112,20 @@ sapply(phones, function(x) {
 sapply(phones, var)
 
 #WAPs with low variance
-variance <- sapply(trainingData1[,c(1:465)], var)
 
-low_variance_WAP <- sapply(variance, function(x){
-  (x<5)
-})
+#if WAP value is 100 change to -105
+change_WAP_value <- apply(trainingData1[,c(1:427)], 2, function(x) {ifelse(x == 100, -105, x)})
 
-which(low_variance_WAP, arr.ind = TRUE)
 
-#if WAP value is 100 chanage to -105
-out <- apply(trainingData1[,c(1:465)], 2, function(x) {ifelse(x == 100, -105, x)})
+#find WAP values >-30 and <0
 
-#find WAP values >-30
-high_value <- sapply(trainingData1[,c(1:465)], function(x){
-  (x>=-30 & x<=0)
-})
+high_value <- sapply(trainingData1[,c(1:430)], function(x){ 
+(x>=-30 & x<=0)})
 
-which(high_value, arr.ind = TRUE)
+
+#Check the means and sds of the WAPs
+trainingData1_mean<-apply(trainingData1[,c(1:427)], 2, mean)
+trainingData1_sd<-apply(trainingData1[,c(1:427)], 2, sd)
 
 
 #plots
@@ -150,28 +164,5 @@ P+geom_point()
 
 
 
-#create separate validation datasets for each building
-validationDataBuilding0<-validationData%>%
-  filter(BUILDINGID==0)
-
-validationDataBuilding1<-validationData%>%
-  filter(BUILDINGID==1)
-
-validationDataBuilding2<-validationData%>%
-  filter(BUILDINGID==2)
-
-
-
-
-
-#Boxplots of WAPs in Building0
-plot(trainingDataBuilding0[1:100], horizontal=FALSE)
-boxplot(trainingDataBuilding0[1:20],horizontal=FALSE)
-boxplot(trainingDataBuilding0[50:100], horizontal=FALSE)
-
-boxplot(trainingData1$LATITUDE)
-boxplot(trainingData1$LONGITUDE)
-
-plot()
 
 ```
