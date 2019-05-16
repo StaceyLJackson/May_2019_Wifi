@@ -2,7 +2,9 @@
 title: "wifi_fingerprinting"
 author: "Stacey Jackson"
 date: "13/05/2019"
-output: html_document
+output:
+  html_document: default
+  word_document: default
 ---
 
 ```{r}
@@ -84,13 +86,35 @@ trainingData1<-trainingData[,-c(3,4,92,93,94,95,152,158,159,160,215,217,226,227,
 
 #find phones with weak signals
 phones <- split(trainingData1, trainingData1$PHONEID)
-str(phones)
 
 sapply(phones, function(x) {
          colMeans(x[, c(1:50)])
 })
 
+#variance of the phones
+sapply(phones, var)
 
+#WAPs with low variance
+variance <- sapply(trainingData1[,c(1:465)], var)
+
+low_variance_WAP <- sapply(variance, function(x){
+  (x<5)
+})
+
+which(low_variance_WAP, arr.ind = TRUE)
+
+#if WAP value is 100 chanage to -105
+out <- apply(trainingData1[,c(1:465)], 2, function(x) {ifelse(x == 100, -105, x)})
+
+#find WAP values >-30
+high_value <- sapply(trainingData1[,c(1:465)], function(x){
+  (x>=-30 & x<=0)
+})
+
+which(high_value, arr.ind = TRUE)
+
+
+#plots
 
 plot(trainingData1$USERID)
 plot(trainingData1$PHONEID)
@@ -101,17 +125,30 @@ p + geom_point()
 p <- ggplot(data=trainingData1, mapping=aes(x=USERID, y=BUILDINGID))
 p + geom_point()
 
+#plot of all three buildings' longitude & latitude showing each floor
+P<-ggplot(trainingData1, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
 
 
-#create separate training datasets for each building
-trainingDataBuilding0<-trainingData%>%
+#create separate training datasets for each building and plot longitude & latitude showing each floor
+trainingDataBuilding0<-trainingData1%>%
   filter(BUILDINGID==0)
 
-trainingDataBuilding1<-trainingData%>%
-  filter(BUILDINGID==1)
+P<-ggplot(trainingDataBuilding0, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
 
-trainingDataBuilding2<-trainingData%>%
+trainingDataBuilding1<-trainingData1%>%
+  filter(BUILDINGID==1)
+P<-ggplot(trainingDataBuilding1, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+trainingDataBuilding2<-trainingData1%>%
   filter(BUILDINGID==2)
+P<-ggplot(trainingDataBuilding2, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+
+
 
 #create separate validation datasets for each building
 validationDataBuilding0<-validationData%>%
@@ -132,6 +169,9 @@ plot(trainingDataBuilding0[1:100], horizontal=FALSE)
 boxplot(trainingDataBuilding0[1:20],horizontal=FALSE)
 boxplot(trainingDataBuilding0[50:100], horizontal=FALSE)
 
+boxplot(trainingData1$LATITUDE)
+boxplot(trainingData1$LONGITUDE)
 
+plot()
 
 ```
