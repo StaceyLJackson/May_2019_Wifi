@@ -1,0 +1,285 @@
+---
+title: "wifi_fingerprinting"
+author: "Stacey Jackson"
+date: "13/05/2019"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r}
+if(require("pacman")=="FALSE"){
+  install.packages('pacman')
+  library('pacman')
+  pacman::p_load(here, readxl, plyr, caret, dplyr, doParallel,
+                 lubridate, corrplot, ggplot2, 
+                 tidyverse, arules, arulesViz, rstudioapi,RMySQL,
+                 plotly, padr, lubridate, forecast,zoo, htmltools, readr)
+} else {
+  library('pacman')
+  pacman::p_load(here, readxl, plyr, caret, dplyr, doParallel,
+                 lubridate, corrplot, ggplot2, 
+                 tidyverse, arules, arulesViz, rstudioapi,RMySQL,
+                 plotly, padr, lubridate, forecast,zoo,htmltools, readr)
+}
+
+
+#Upload the files
+trainingData<-read.csv(file="/Users/staceyjackson/Dropbox (Personal)/Ubiqum/May_2019_Wifi/Dataset/UJIndoorLoc/trainingData.csv", header=TRUE, sep=",")
+
+validationData<-read.csv(file="/Users/staceyjackson/Dropbox (Personal)/Ubiqum/May_2019_Wifi/Dataset/UJIndoorLoc/validationData.csv", header=TRUE, sep=",")
+```
+
+####1. INVESTIGATE THE TRAINING SET
+####1.1 Factors and timestamp
+```{r}
+
+#Look at the classes
+str(trainingData)
+sapply(trainingData, class)
+
+
+#change 523-528 to factors - relative position, USERID, PHONEID, BUILDING ID
+columns <- c(523:528)
+trainingData[,columns] <- lapply(trainingData[,columns], as.factor)
+
+sapply(trainingData,class)
+
+
+#change time to POSixt
+trainingData$TIMESTAMP <- as.POSIXct(trainingData$TIMESTAMP,origin="1970-01-01")
+validationData$TIMESTAMP <- as.POSIXct(validationData$TIMESTAMP,origin="1970-01-01")
+```
+
+#1.2. Initial plots
+```{r}
+plot(trainingData$BUILDINGID)
+plot(trainingData$USERID)
+plot(trainingData$SPACEID)
+
+p <- ggplot(data = trainingData, mapping = aes(x =USERID, y=PHONEID))
+p + geom_point()
+
+p <- ggplot(data = validationData, mapping = aes(x =LONGITUDE, y=LATITUDE))
+p + geom_point()
+
+plot(trainingData$USERID)
+plot(trainingData$PHONEID)
+
+p <- ggplot(data=trainingData, mapping=aes(x=USERID, y=PHONEID))
+p + geom_point()
+
+p <- ggplot(data=trainingData, mapping=aes(x=USERID, y=BUILDINGID))
+p + geom_point()
+
+#plot of all three buildings' longitude & latitude showing each floor
+P<-ggplot(trainingData, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+
+#create separate training datasets for each building and plot longitude & latitude showing each floor
+trainingDataBuilding0<-trainingData%>%
+  filter(BUILDINGID==0)
+
+P<-ggplot(trainingDataBuilding0, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+trainingDataBuilding1<-trainingData%>%
+  filter(BUILDINGID==1)
+P<-ggplot(trainingDataBuilding1, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+trainingDataBuilding2<-trainingData%>%
+  filter(BUILDINGID==2)
+P<-ggplot(trainingDataBuilding2, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+
+```
+
+#1.3. Delete WAPs with a mean of 100
+```{r}
+
+#means<-apply(trainingData[1:520], 2, mean)
+#means<-as.data.frame(means)
+
+mean<-0
+for (i in 1:520){
+  mean[i]<-mean(trainingData[,i])
+}
+mean[521:529]<-0
+mean<-as.data.frame(mean)
+
+#delete all the WAPs with a mean of =100
+indices<-c()
+indices[521:529]<-0
+for (i in 1:520){
+if (mean[i,]==100){
+  indices[i]<- i
+}
+}
+trainingData2<- trainingData[is.na(indices)]
+
+trainingData2<-cbind(trainingData2,trainingData[,c(521:529)])
+```
+#1.4 Phones with weak signals
+```{r}
+phones <- split(trainingData2, trainingData2$PHONEID)
+
+sapply(phones, function(x) {
+         colMeans(x[, c(1:50)])
+})
+
+#variance of the phones
+sapply(phones, var)
+```
+#1.5 WAPs with low variance
+```{r}
+
+variance <- sapply(trainingData2[,c(1:465)], var)
+low_variance_WAP <- sapply(variance, function(x){
+ (x>5)
+})
+low_variance_WAP<- which(low_variance_WAP, arr.ind = TRUE)
+low_variance_WAP<- as.data.frame(low_variance_WAP)
+
+indices2<-low_variance_WAP[,1]
+trainingData3<- trainingData2[(indices2)]
+
+trainingData4<-cbind(trainingData3,trainingData2[,c(466:474)])
+```
+#1.6 Change WAP values from 100 to -105 
+```{r}
+
+change_WAP_value <- apply(trainingData4[,c(1:430)], 2, function(x) {ifelse(x == 100, -105, x)})
+
+change_WAP_value<-as.data.frame(change_WAP_value)
+
+trainingData5<-cbind(change_WAP_value,trainingData2[,c(466:474)])
+
+```
+
+#1.7 Find WAP values >-30 and <0
+```{r}
+#found WAPs with high values but what to do with them?
+
+high_value <- sapply(trainingData5[,c(1:430)], function(x){
+ (x>=-30 & x<=0)
+})
+
+which(high_value, arr.ind = TRUE)
+```
+
+#1.8 Means and sds of the WAPs
+```{r}
+
+
+trainingData5_mean<-apply(trainingData5[,c(1:430)], 2, mean)
+trainingData5_sd<-apply(trainingData5[,c(1:430)], 2, sd)
+
+```
+
+#2. REMOVE VARIABLES - spaceID, relative position, userID, phoneID, timestamp
+```{r}
+trainingData6<-trainingData5[,-c(435:439)]
+```
+
+#3. CREATE SAMPLE OF THE TRAINING SET
+```{r}
+
+sample <- trainingData6 %>% group_by(FLOOR, BUILDINGID) %>% sample_n(100)
+
+table(sample$FLOOR)
+table(sample$BUILDINGID)
+
+
+a <- htmltools::tagList()    
+for(i in unique(sample$BUILDINGID)){
+a[[i]] <- sample %>% dplyr:: filter(BUILDINGID == i) %>% plot_ly(type = "scatter3d",
+       x = ~ LATITUDE,
+       y = ~ LONGITUDE,
+       z = ~ FLOOR,
+       mode = 'markers')
+
+
+}  
+a[[1]]
+a[[2]]
+a[[3]]
+```
+#4. MODEL 1: randomForest 
+```{r}
+# Load package
+library(randomForest)
+
+# Saving the waps in a vector
+#WAPs<-grep("WAP", names(trainingData6), value=T)
+
+# Get the best mtry
+#bestmtry_rf<-tuneRF(sample[WAPs], sample$LONGITUDE, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+# Train a random forest using that mtry
+#system.time(rf_reg<-randomForest(y=sample$LONGITUDE,x=sample[WAPs],importance=T,method="rf", ntree=100, mtry=36))
+
+# Train a random forest using caret package
+#system.time(rf_reg_caret<-train(y=sample$LONGITUDE, x=sample[WAPs], data = sample, method="rf", ntree=100,tuneGrid=expand.grid(.mtry=36)))
+
+
+```
+#5.MODEL2: KNN: caret package
+Explore the main parameters of these functions knn3() for classification and knnreg() for regression:
+
+Train two knn models with these packages and the caret package:
+```{r}
+# Load the package
+library(caret)
+
+# Saving the waps in a vector
+WAPs<-grep("WAP", names(sample), value=T)
+
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(sample[WAPs], method=c("center", "scale"))
+
+# transform the waps using the parameters
+stand_waps <- predict(preprocessParams, sample[WAPs])
+
+# complete dataset
+stand_dataset<-cbind(stand_waps, BUILDINGID=sample$BUILDINGID,LONGITUDE=sample$LONGITUDE)
+
+# Train two classification knn (with knn3 and train)
+system.time(knn_clasif <- knn3(BUILDINGID ~ as.matrix(stand_dataset[WAPs]), data = stand_dataset))
+
+system.time(knn_clasif_caret<-train(y=stand_dataset$BUILDINGID, x=stand_dataset[WAPs], data = stand_dataset, method="knn"))
+
+# Train two regression knn (with knnreg and caret)
+system.time(knn_reg<-knnreg(LONGITUDE ~ as.matrix(stand_dataset[WAPs]), data = stand_dataset))
+
+system.time(knn_reg_caret<-train(y=stand_dataset$LONGITUDE, x=stand_dataset[WAPs], data = stand_dataset, method="knn"))
+```
+#6.MODEL3: SVM: e1071 package
+Explore the main parameters of these functions svm() for classification and regression.
+
+Read this resource for more info svm() for classification and regression.
+
+Train two svm models with these packages and the caret package
+```{r}
+# Load the packages
+library(e1071)
+library(caret)
+
+# Saving the waps in a vector
+WAPs<-grep("WAP", names(sample), value=T)
+
+# Train two classification svm (with svm and train)
+system.time(svm_clasif <- svm(y = stand_dataset$BUILDINGID, x=stand_dataset[WAPs]))
+
+system.time(svm_clasif_caret<-train(y=stand_dataset$BUILDINGID, x=stand_dataset[WAPs], data = stand_dataset, method="svmLinear"))
+
+# Train two regression svm (with svm and train)
+system.time(svm_reg <- svm(y = stand_dataset$LONGITUDE, x=stand_dataset[WAPs]))
+
+system.time(svm_reg_caret<-train(y=stand_dataset$LONGITUDE, x=as.matrix(stand_dataset[WAPs], data = stand_dataset, method="svmLinear")))
+```
+
+
+
