@@ -1,0 +1,449 @@
+---
+title: "wifi_fingerprinting"
+author: "Stacey Jackson"
+date: "13/05/2019"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r}
+if(require("pacman")=="FALSE"){
+  install.packages('pacman')
+  library('pacman')
+  pacman::p_load(here, readxl, plyr, caret, dplyr, doParallel,
+                 lubridate, corrplot, ggplot2, 
+                 tidyverse, arules, arulesViz, rstudioapi,RMySQL,
+                 plotly, padr, lubridate, forecast,zoo, htmltools, readr)
+} else {
+  library('pacman')
+  pacman::p_load(here, readxl, plyr, caret, dplyr, doParallel,
+                 lubridate, corrplot, ggplot2, 
+                 tidyverse, arules, arulesViz, rstudioapi,RMySQL,
+                 plotly, padr, lubridate, forecast,zoo,htmltools, readr)
+}
+
+
+#Upload the files
+trainingData<-read.csv(file="/Users/staceyjackson/Dropbox (Personal)/Ubiqum/May_2019_Wifi/Dataset/UJIndoorLoc/trainingData.csv", header=TRUE, sep=",")
+
+validationData<-read.csv(file="/Users/staceyjackson/Dropbox (Personal)/Ubiqum/May_2019_Wifi/Dataset/UJIndoorLoc/validationData.csv", header=TRUE, sep=",")
+```
+
+####1. INVESTIGATE THE TRAINING SET
+####1.1 Factors and timestamp
+```{r}
+
+#Look at the classes
+str(trainingData)
+sapply(trainingData, class)
+
+
+#change 523-528 to factors - relative position, USERID, PHONEID, BUILDING ID
+columns <- c(523:528)
+trainingData[,columns] <- lapply(trainingData[,columns], as.factor)
+validationData[,columns]<-lapply(validationData[,columns],as.factor)
+
+sapply(trainingData,class)
+
+
+#change time to POSixt
+trainingData$TIMESTAMP <- as.POSIXct(trainingData$TIMESTAMP,origin="1970-01-01")
+validationData$TIMESTAMP <- as.POSIXct(validationData$TIMESTAMP,origin="1970-01-01")
+```
+
+#1.2. Initial plots of the trainingData
+```{r}
+plot(trainingData$BUILDINGID)
+plot(trainingData$USERID)
+plot(trainingData$SPACEID)
+
+p <- ggplot(data = trainingData, mapping = aes(x =USERID, y=PHONEID))
+p + geom_point()
+
+p <- ggplot(data = validationData, mapping = aes(x =LONGITUDE, y=LATITUDE))
+p + geom_point()
+
+plot(trainingData$USERID)
+plot(trainingData$PHONEID)
+
+p <- ggplot(data=trainingData, mapping=aes(x=USERID, y=PHONEID))
+p + geom_point()
+
+p <- ggplot(data=trainingData, mapping=aes(x=USERID, y=BUILDINGID))
+p + geom_point()
+
+#plot of all three buildings' longitude & latitude showing each floor
+P<-ggplot(trainingData, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+
+#create separate training datasets for each building and plot longitude & latitude showing each floor
+trainingDataBuilding0<-trainingData%>%
+  filter(BUILDINGID==0)
+
+P<-ggplot(trainingDataBuilding0, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+trainingDataBuilding1<-trainingData%>%
+  filter(BUILDINGID==1)
+P<-ggplot(trainingDataBuilding1, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+trainingDataBuilding2<-trainingData%>%
+  filter(BUILDINGID==2)
+P<-ggplot(trainingDataBuilding2, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P+geom_point()
+
+
+```
+
+#1.3. Delete WAPs with a mean of 100
+```{r}
+
+#TRAINING DATA
+#means<-apply(trainingData[1:520], 2, mean)
+#means<-as.data.frame(means)
+
+mean<-0
+for (i in 1:520){
+  mean[i]<-mean(trainingData[,i])
+}
+mean[521:529]<-0
+mean<-as.data.frame(mean)
+
+#delete all the WAPs with a mean of =100
+indices<-c()
+indices[521:529]<-0
+for (i in 1:520){
+if (mean[i,]==100){
+  indices[i]<- i
+}
+}
+trainingData2<- trainingData[is.na(indices)]
+
+trainingData2<-cbind(trainingData2,trainingData[,c(521:529)])
+
+validationData2<-validationData[is.na(indices)]
+
+validationData2<-cbind(validationData2,validationData[,c(521:529)])
+
+
+```
+#1.4 Phones with weak signals in training data
+```{r}
+phones <- split(trainingData2, trainingData2$PHONEID)
+
+sapply(phones, function(x) {
+         colMeans(x[, c(1:50)])
+})
+
+#variance of the phones
+sapply(phones, var)
+```
+#1.5 WAPs with low variance in training data
+```{r}
+
+variance <- sapply(trainingData2[,c(1:465)], var)
+not_low_variance_WAP <- sapply(variance, function(x){
+ (x>5)
+})
+not_low_variance_WAP<- which(not_low_variance_WAP, arr.ind = TRUE)
+not_low_variance_WAP<- as.data.frame(not_low_variance_WAP)
+
+indices2<-not_low_variance_WAP[,1]
+trainingData3<- trainingData2[(indices2)]
+
+trainingData4<-cbind(trainingData3,trainingData2[,c(466:474)])
+
+validationData3 <- validationData2[(indices2)]
+validationData4<-cbind(validationData3,validationData[,c(521:529)])
+
+
+```
+#1.6 Change WAP values from 100 to -105 
+```{r}
+
+#TRAINING DATA
+change_WAP_value <- apply(trainingData4[,c(1:430)], 2, function(x) {ifelse(x == 100, -105, x)})
+
+change_WAP_value<-as.data.frame(change_WAP_value)
+
+trainingData5<-cbind(change_WAP_value,trainingData2[,c(466:474)])
+
+#VALIDATION DATA
+change_WAP_value <- apply(validationData4[,c(1:430)], 2, function(x) {ifelse(x == 100, -105, x)})
+
+change_WAP_value<-as.data.frame(change_WAP_value)
+
+validationData5<-cbind(change_WAP_value,validationData4[,c(431:439)])
+
+```
+
+#1.7 Find WAP values >-30 
+```{r}
+#found WAPs with high values but what to do with them?
+
+
+trainingData5$high_value <- apply(trainingData5[,c(1:430)], 1, max)
+
+#by user
+high_value_user <- select(trainingData5,USERID,high_value)%>%
+  filter(high_value>-30)
+high_value_user 
+
+#by phone
+high_value_phone <- select(trainingData5,PHONEID,high_value)%>%
+  filter(high_value>-30)
+high_value_phone 
+
+#plots
+high_value_phone<-as.data.frame(high_value_phone)
+p <- ggplot(data=high_value_phone, mapping=aes(x=PHONEID, y=high_value))
+p + geom_point()
+
+high_value_user<-as.data.frame(high_value_user)
+p <- ggplot(data=high_value_user, mapping=aes(x=USERID, y=high_value))
+p + geom_point()
+
+high_value_user1<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==1)
+p <- ggplot(data=high_value_user1, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user3<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==3)
+p <- ggplot(data=high_value_user3, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user6<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==6)
+p <- ggplot(data=high_value_user6, mapping=aes(x=high_value))
+p + geom_histogram()
+
+phone19<-trainingData5%>%
+  select(PHONEID,high_value)%>%
+  filter(PHONEID==19)
+p <- ggplot(data=phone19, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user10<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==10)
+p <- ggplot(data=high_value_user10, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user14<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==14)
+p <- ggplot(data=high_value_user14, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user15<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==15)
+p <- ggplot(data=high_value_user15, mapping=aes(x=high_value))
+p + geom_histogram()
+
+
+high_value_user16<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==16)
+p <- ggplot(data=high_value_user16, mapping=aes(x=high_value))
+p + geom_histogram()
+
+
+```
+
+#2. REMOVE VARIABLES - spaceID, relative position, userID, phoneID, timestamp, and user 6 from the training set.
+```{r}
+
+trainingData5 <- trainingData5 %>% filter(USERID != 6)
+
+trainingData6<-trainingData5[,-c(435:440)]
+
+
+validationData6<-validationData5[,-c(435:439)]
+```
+
+#3. CREATE SAMPLE OF THE TRAINING SET
+```{r}
+
+sample <- trainingData6 %>% group_by(FLOOR, BUILDINGID) %>% sample_n(100)
+
+table(sample$FLOOR)
+table(sample$BUILDINGID)
+
+
+a <- htmltools::tagList()    
+for(i in unique(sample$BUILDINGID)){
+a[[i]] <- sample %>% dplyr:: filter(BUILDINGID == i) %>% plot_ly(type = "scatter3d",
+       x = ~ LATITUDE,
+       y = ~ LONGITUDE,
+       z = ~ FLOOR,
+       mode = 'markers')
+
+
+}  
+a[[1]]
+a[[2]]
+a[[3]]
+```
+
+
+#4. PREDICT THE BUILDING
+# 4.1 Random Forest
+```{r}
+# Load package
+library(randomForest)
+
+#Saving the waps in a vector - training
+WAPs_training<-grep("WAP", names(trainingData6), value=T)
+
+# Get the best mtry
+bestmtry_rf<-tuneRF(sample[WAPs_training], sample$BUILDINGID, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#Train a random forest using that mtry
+rfFit1<-randomForest(y=sample$BUILDINGID,x=sample[WAPs_training],importance=T,method="rf", ntree=100, mtry=20)
+rfFit1
+predicted_building<-predict(rfFit1,validationData6)
+postResample(pred =predicted_building,obs=validationData6$BUILDINGID)
+confusionMatrix(predicted_building, validationData6$BUILDINGID)
+
+# Train a random forest using caret package
+rf_reg_caret<-train(y=sample$BUILDINGID, x=sample[WAPs_training], data = sample, method="rf", ntree=100,tuneGrid=expand.grid(.mtry=20))
+predicted_building<-predict(rf_reg_caret,validationData6)
+postResample(pred =predicted_building,obs=validationData6$BUILDINGID)
+confusionMatrix(predicted_building, validationData6$BUILDINGID)
+
+```
+
+#5. CHANGE COLUMN NAMES IN THE VALIDATION DATA & ADD IN BUILDING PREDICTIONS
+```{r}
+
+names(validationData6)[names(validationData6)=="BUILDINGID"] <- "original_building"
+
+
+validationData6$predicted_building<-as.data.frame(predicted_building)
+
+names(validationData6)[names(validationData6)=="predicted_building"] <- "BUILDINGID"
+```
+
+#6. DIVIDE TRAINING & VALIDATION DATASETS INTO THREE - ONE FOR EACH BUILDING
+```{r}
+#Training
+trainingDataBuilding0 <- trainingData6%>%
+  filter(BUILDINGID==0)
+
+trainingDataBuilding1 <- trainingData6%>%
+  filter(BUILDINGID==1)
+
+trainingDataBuilding2 <- trainingData6%>%
+  filter(BUILDINGID==2)
+
+#Validation
+validationDataBuilding0<-validationData6%>%
+  filter(BUILDINGID==0)
+
+validationDataBuilding1<-validationData6%>%
+  filter(BUILDINGID==1)
+
+validationDataBuilding2<-validationData6%>%
+  filter(BUILDINGID==2)
+```
+
+#7 PREDICT FLOOR
+#7.1 Building 0
+```{r}
+#Save WAPs in a vector
+WAPs_training<-grep("WAP", names(trainingDataBuilding0), value=T)
+
+# Get the best mtry
+bestmtry_rf<-tuneRF(y=trainingDataBuilding0$FLOOR, x=(trainingDataBuilding0$BUILDINGID + trainingDataBuilding0[WAPs_training]), ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+rf_reg_caret<-train(y=trainingDataBuilding0$FLOOR, x=trainingDataBuilding0[WAPs_training] + trainingDataBuilding0$BUILDINGID, data = trainingDataBuilding0, method="rf", ntree=100,tuneGrid=expand.grid(.mtry=10))
+
+predicted_floor<-predict(rf_reg_caret,validationDataBuilding0)
+postResample(pred =predicted_floor,obs=validationDataBuilding0$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding0$FLOOR)
+
+#KNN
+fitControl<-trainControl(method="repeatedcv",number = 5,repeats=1)
+KNNfit1<-train(FLOOR~trainingDataBuilding0[WAPs_training]+trainingDataBuilding0$BUILDINGID,data=trainingDataBuilding0,method="knn",trControl=fitControl,preProcess = c("center","scale"), tuneLength=20)
+KNNfit1
+predict_floor<-predict(KNNfit1,validationDataBuilding0)
+postResample(pred = prediction1,obs=validationDataBuilding0$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding0$FLOOR)
+```
+
+#7.2 Building 1
+```{r}
+#Save WAPs in a vector
+WAPs_training<-grep("WAP", names(trainingDataBuilding0), value=T)
+
+# Get the best mtry
+bestmtry_rf<-tuneRF(WAPs_training, trainingDataBuilding0$BUILDINGID,trainingDataBuilding0$FLOOR, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+rf_reg_caret<-train(y=trainingDataBuilding0$FLOOR, x=WAPs_training + BUILDINGID, data = trainingDataBuilding0, method="rf", ntree=100,tuneGrid=expand.grid(.mtry=10))
+
+predicted_floor<-predict(rf_reg_caret,validationDataBuilding0)
+postResample(pred =predicted_floor,obs=validationDataBuilding0$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding0$FLOOR)
+
+#KNN
+fitControl<-trainControl(method="repeatedcv",number = 5,repeats=1)
+KNNfit1<-train(FLOOR~WAPs_training+BUILDINGID,data=trainingDataBuilding0,method="knn",trControl=fitControl,preProcess = c("center","scale"), tuneLength=20)
+KNNfit1
+predict_floor<-predict(KNNfit1,validationDataBuilding0)
+postResample(pred = prediction1,obs=validationDataBuilding0$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding0$FLOOR)
+```
+
+#7.3 Building 2
+```{r}
+#Save WAPs in a vector
+WAPs_training<-grep("WAP", names(trainingDataBuilding0), value=T)
+
+# Get the best mtry
+bestmtry_rf<-tuneRF(WAPs_training, trainingDataBuilding0$BUILDINGID,trainingDataBuilding0$FLOOR, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+rf_reg_caret<-train(y=trainingDataBuilding0$FLOOR, x=WAPs_training + BUILDINGID, data = trainingDataBuilding0, method="rf", ntree=100,tuneGrid=expand.grid(.mtry=10))
+
+predicted_floor<-predict(rf_reg_caret,validationDataBuilding0)
+postResample(pred =predicted_floor,obs=validationDataBuilding0$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding0$FLOOR)
+
+#KNN
+fitControl<-trainControl(method="repeatedcv",number = 5,repeats=1)
+KNNfit1<-train(FLOOR~WAPs_training+BUILDINGID,data=trainingDataBuilding0,method="knn",trControl=fitControl,preProcess = c("center","scale"), tuneLength=20)
+KNNfit1
+predict_floor<-predict(KNNfit1,validationDataBuilding0)
+postResample(pred = prediction1,obs=validationDataBuilding0$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding0$FLOOR)
+```
+
+#8.CHANGE "FLOOR" IN COMPLETE VALIDATION SET AND IN DATASET FOR EACH BUILDING
+```{r}
+#names(validationData6)[names(validationData6)=="FLOOR"] <- "original_floor"
+
+#names(validationDataBuilding0)[names(validationDataBuilding0)=="FLOOR"] <- "original_floor"
+
+#names(validationDataBuilding1)[names(validationDataBuilding1)=="FLOOR"] <- "original_floor"
+
+#names(validationDataBuilding2)[names(validationDataBuilding2)=="FLOOR"] <- "original_floor"
+```
+
+#9. PREDICT LONGITUDE
+#9.1 Building 0
+```{r}
+
+```
+
+
+

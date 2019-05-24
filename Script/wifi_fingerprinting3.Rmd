@@ -3,8 +3,8 @@ title: "wifi_fingerprinting"
 author: "Stacey Jackson"
 date: "13/05/2019"
 output:
-  html_document: default
   word_document: default
+  html_document: default
 ---
 
 ```{r}
@@ -14,20 +14,23 @@ if(require("pacman")=="FALSE"){
   pacman::p_load(here, readxl, plyr, caret, dplyr, doParallel,
                  lubridate, corrplot, ggplot2, 
                  tidyverse, arules, arulesViz, rstudioapi,RMySQL,
-                 plotly, padr, lubridate, forecast,zoo, htmltools, readr)
+                 plotly, padr, lubridate, forecast,zoo, htmltools, readr,h2o)
 } else {
   library('pacman')
   pacman::p_load(here, readxl, plyr, caret, dplyr, doParallel,
                  lubridate, corrplot, ggplot2, 
                  tidyverse, arules, arulesViz, rstudioapi,RMySQL,
-                 plotly, padr, lubridate, forecast,zoo,htmltools, readr)
+                 plotly, padr, lubridate, forecast,zoo,htmltools, readr,h2o)
 }
 
+h2o.init(nthreads=-1)
 
 #Upload the files
 trainingData<-read.csv(file="/Users/staceyjackson/Dropbox (Personal)/Ubiqum/May_2019_Wifi/Dataset/UJIndoorLoc/trainingData.csv", header=TRUE, sep=",")
 
 validationData<-read.csv(file="/Users/staceyjackson/Dropbox (Personal)/Ubiqum/May_2019_Wifi/Dataset/UJIndoorLoc/validationData.csv", header=TRUE, sep=",")
+
+
 ```
 
 ####1. INVESTIGATE THE TRAINING SET
@@ -35,13 +38,14 @@ validationData<-read.csv(file="/Users/staceyjackson/Dropbox (Personal)/Ubiqum/Ma
 ```{r}
 
 #Look at the classes
-str(trainingData)
+#str(trainingData)
 sapply(trainingData, class)
 
 
 #change 523-528 to factors - relative position, USERID, PHONEID, BUILDING ID
 columns <- c(523:528)
 trainingData[,columns] <- lapply(trainingData[,columns], as.factor)
+validationData[,columns]<-lapply(validationData[,columns],as.factor)
 
 sapply(trainingData,class)
 
@@ -51,7 +55,7 @@ trainingData$TIMESTAMP <- as.POSIXct(trainingData$TIMESTAMP,origin="1970-01-01")
 validationData$TIMESTAMP <- as.POSIXct(validationData$TIMESTAMP,origin="1970-01-01")
 ```
 
-#1.2. Initial plots
+#1.2. Initial plots of the trainingData
 ```{r}
 plot(trainingData$BUILDINGID)
 plot(trainingData$USERID)
@@ -78,21 +82,21 @@ P+geom_point()
 
 
 #create separate training datasets for each building and plot longitude & latitude showing each floor
-trainingDataBuilding0<-trainingData%>%
-  filter(BUILDINGID==0)
+#trainingDataBuilding0<-trainingData%>%
+ # filter(BUILDINGID==0)
 
-P<-ggplot(trainingDataBuilding0, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
-P+geom_point()
+#P<-ggplot(trainingDataBuilding0, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+#P+geom_point()
 
 trainingDataBuilding1<-trainingData%>%
   filter(BUILDINGID==1)
 P<-ggplot(trainingDataBuilding1, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
 P+geom_point()
 
-trainingDataBuilding2<-trainingData%>%
-  filter(BUILDINGID==2)
-P<-ggplot(trainingDataBuilding2, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
-P+geom_point()
+#trainingDataBuilding2<-trainingData%>%
+#  filter(BUILDINGID==2)
+#P<-ggplot(trainingDataBuilding2, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+#P+geom_point()
 
 
 ```
@@ -100,6 +104,7 @@ P+geom_point()
 #1.3. Delete WAPs with a mean of 100
 ```{r}
 
+#TRAINING DATA
 #means<-apply(trainingData[1:520], 2, mean)
 #means<-as.data.frame(means)
 
@@ -121,8 +126,14 @@ if (mean[i,]==100){
 trainingData2<- trainingData[is.na(indices)]
 
 trainingData2<-cbind(trainingData2,trainingData[,c(521:529)])
+
+validationData2<-validationData[is.na(indices)]
+
+validationData2<-cbind(validationData2,validationData[,c(521:529)])
+
+
 ```
-#1.4 Phones with weak signals
+#1.4 Phones with weak signals in training data
 ```{r}
 phones <- split(trainingData2, trainingData2$PHONEID)
 
@@ -133,152 +144,535 @@ sapply(phones, function(x) {
 #variance of the phones
 sapply(phones, var)
 ```
-#1.5 WAPs with low variance
+#1.5 WAPs with low variance in training data
 ```{r}
 
 variance <- sapply(trainingData2[,c(1:465)], var)
-low_variance_WAP <- sapply(variance, function(x){
+not_low_variance_WAP <- sapply(variance, function(x){
  (x>5)
 })
-low_variance_WAP<- which(low_variance_WAP, arr.ind = TRUE)
-low_variance_WAP<- as.data.frame(low_variance_WAP)
+not_low_variance_WAP<- which(not_low_variance_WAP, arr.ind = TRUE)
+not_low_variance_WAP<- as.data.frame(not_low_variance_WAP)
 
-indices2<-low_variance_WAP[,1]
+indices2<-not_low_variance_WAP[,1]
 trainingData3<- trainingData2[(indices2)]
 
 trainingData4<-cbind(trainingData3,trainingData2[,c(466:474)])
+
+validationData3 <- validationData2[(indices2)]
+validationData4<-cbind(validationData3,validationData[,c(521:529)])
+
+
 ```
 #1.6 Change WAP values from 100 to -105 
 ```{r}
 
+#TRAINING DATA
 change_WAP_value <- apply(trainingData4[,c(1:430)], 2, function(x) {ifelse(x == 100, -105, x)})
 
 change_WAP_value<-as.data.frame(change_WAP_value)
 
 trainingData5<-cbind(change_WAP_value,trainingData2[,c(466:474)])
 
+#VALIDATION DATA
+change_WAP_value <- apply(validationData4[,c(1:430)], 2, function(x) {ifelse(x == 100, -105, x)})
+
+change_WAP_value<-as.data.frame(change_WAP_value)
+
+validationData5<-cbind(change_WAP_value,validationData4[,c(431:439)])
+
 ```
 
-#1.7 Find WAP values >-30 and <0
+#1.7 Find WAP values >-30 
 ```{r}
 #found WAPs with high values but what to do with them?
 
-high_value <- sapply(trainingData5[,c(1:430)], function(x){
- (x>=-30 & x<=0)
-})
 
-which(high_value, arr.ind = TRUE)
+trainingData5$high_value <- apply(trainingData5[,c(1:430)], 1, max)
+
+#by user
+high_value_user <- select(trainingData5,USERID,high_value)%>%
+  filter(high_value>-30)
+high_value_user 
+
+#by phone
+high_value_phone <- select(trainingData5,PHONEID,high_value)%>%
+  filter(high_value>-30)
+high_value_phone 
+
+#plots
+high_value_phone<-as.data.frame(high_value_phone)
+p <- ggplot(data=high_value_phone, mapping=aes(x=PHONEID, y=high_value))
+p + geom_point()
+
+high_value_user<-as.data.frame(high_value_user)
+p <- ggplot(data=high_value_user, mapping=aes(x=USERID, y=high_value))
+p + geom_point()
+
+high_value_user6<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==6)
+p <- ggplot(data=high_value_user6, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user3<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==3)
+p <- ggplot(data=high_value_user3, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user6<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==6)
+p <- ggplot(data=high_value_user6, mapping=aes(x=high_value))
+p + geom_histogram(fill="steelblue") + labs(x = "WAP readings for User 6")
+
+phone19<-trainingData5%>%
+  select(PHONEID,high_value)%>%
+  filter(PHONEID==19)
+p <- ggplot(data=phone19, mapping=aes(x=high_value))
+p + geom_histogram(fill="red") + labs(x = "WAP readings for Phone 19")
+
+high_value_user10<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==10)
+p <- ggplot(data=high_value_user10, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user14<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==14)
+p <- ggplot(data=high_value_user14, mapping=aes(x=high_value))
+p + geom_histogram()
+
+high_value_user15<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==15)
+p <- ggplot(data=high_value_user15, mapping=aes(x=high_value))
+p + geom_histogram()
+
+
+high_value_user16<- trainingData5%>%
+  select(USERID, high_value)%>%
+  filter(USERID==16)
+p <- ggplot(data=high_value_user16, mapping=aes(x=high_value))
+p + geom_histogram()
+
+
 ```
 
-#1.8 Means and sds of the WAPs
+#2. REMOVE VARIABLES - spaceID, relative position, userID, phoneID, timestamp, and user 6 from the training set.
 ```{r}
 
+trainingData5 <- trainingData5 %>% filter(USERID != 6)
 
-trainingData5_mean<-apply(trainingData5[,c(1:430)], 2, mean)
-trainingData5_sd<-apply(trainingData5[,c(1:430)], 2, sd)
+trainingData6<-trainingData5[,-c(435:440)]
 
-```
 
-#2. REMOVE VARIABLES - spaceID, relative position, userID, phoneID, timestamp
-```{r}
-trainingData6<-trainingData5[,-c(435:439)]
+validationData6<-validationData5[,-c(435:439)]
 ```
 
 #3. CREATE SAMPLE OF THE TRAINING SET
 ```{r}
 
-sample <- trainingData6 %>% group_by(FLOOR, BUILDINGID) %>% sample_n(100)
+sample <- trainingData6 %>% group_by(FLOOR, BUILDINGID) %>% sample_n(10)
 
 table(sample$FLOOR)
 table(sample$BUILDINGID)
 
 
-a <- htmltools::tagList()    
-for(i in unique(sample$BUILDINGID)){
-a[[i]] <- sample %>% dplyr:: filter(BUILDINGID == i) %>% plot_ly(type = "scatter3d",
-       x = ~ LATITUDE,
-       y = ~ LONGITUDE,
-       z = ~ FLOOR,
-       mode = 'markers')
+#a <- htmltools::tagList()    
+#for(i in unique(sample$BUILDINGID)){
+#a[[i]] <- sample %>% dplyr:: filter(BUILDINGID == i) %>% plot_ly(type = "scatter3d",
+       #x = ~ LATITUDE,
+       #y = ~ LONGITUDE,
+       #z = ~ FLOOR,
+       #mode = 'markers')
 
 
-}  
-a[[1]]
-a[[2]]
-a[[3]]
+#}  
+#a[[1]]
+#a[[2]]
+#a[[3]]
 ```
-#4. MODEL 1: randomForest 
+
+
+#4. PREDICT THE BUILDING
+# 4.1 Random Forest
 ```{r}
 # Load package
 library(randomForest)
 
-# Saving the waps in a vector
-#WAPs<-grep("WAP", names(trainingData6), value=T)
+#Saving the waps in a vector - training
+WAPs_training<-grep("WAP", names(trainingData6), value=T)
 
 # Get the best mtry
-#bestmtry_rf<-tuneRF(sample[WAPs], sample$LONGITUDE, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+bestmtry_rf<-tuneRF(sample[WAPs_training], trainingData6$BUILDINGID, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
 
-# Train a random forest using that mtry
-#system.time(rf_reg<-randomForest(y=sample$LONGITUDE,x=sample[WAPs],importance=T,method="rf", ntree=100, mtry=36))
+training.h2o <- as.h2o(trainingData6)
+test.h2o <- as.h2o(validationData6)
+
+
+#Train a random forest using that mtry y=BUILDING ID
+y.dep <-434
+x.indep <- c(1:430)
+rf_h2o<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = training.h2o,ntree=100, mtries=10, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o)
+varImp <- h2o.varimp(rf_h2o)
+BUILDRF<-as.data.frame(h2o.predict(rf_h2o, test.h2o))
+postResample(BUILDRF, validationData6$BUILDINGID)
+
+confusionMatrix(predicted_buildingRF$predict, validationData6$BUILDINGID)
+
+#GRADIENT BOOSTED MACHINE
+gbm_h2o<- h2o.gbm(y=y.dep, x=x.indep, training_frame = training.h2o, ntrees = 100, max_depth = 4, learn_rate = 0.01, seed = 1122)
+h2o.performance(gbm_h2o)
+varImp <- h2o.varimp(gbm_h2o)
+predicted_building_gbm<-as.data.frame(h2o.predict(gbm_h2o, B0test.h2o))
+postResample(predicted_building_gbm, validationData6$BUILDINGID)
+
+h2o.confusionMatrix(predicted_building_gbm, validationData6$BUILDINGID)
 
 # Train a random forest using caret package
-#system.time(rf_reg_caret<-train(y=sample$LONGITUDE, x=sample[WAPs], data = sample, method="rf", ntree=100,tuneGrid=expand.grid(.mtry=36)))
+rf_reg_caret<-train(y=sample$BUILDINGID, x=sample[WAPs_training], data = sample, method="rf", ntree=100,tuneGrid=expand.grid(.mtry=10))
+predicted_buildingRFcaret<-predict(rf_reg_caret,validationData6)
+postResample(pred =predicted_buildingRFcaret,obs=validationData6$BUILDINGID)
+confusionMatrix(predicted_buildingRFcaret, validationData6$BUILDINGID)
+
+#KNN - WORKING
+
+library(class)
+preprocessParams <- preProcess(sample[WAPs_training], method=c("center", "scale"))
 
 
-```
-#5.MODEL2: KNN: caret package
-Explore the main parameters of these functions knn3() for classification and knnreg() for regression:
+stand_waps <- predict(preprocessParams, sample[WAPs_training])
 
-Train two knn models with these packages and the caret package:
-```{r}
-# Load the package
-library(caret)
+stand_waps_val <- predict(preprocessParams, validationData6[WAPs_training])
 
-# Saving the waps in a vector
-WAPs<-grep("WAP", names(sample), value=T)
 
-# calculate the pre-process parameters from the dataset
-preprocessParams <- preProcess(sample[WAPs], method=c("center", "scale"))
+knn_class <- knn(train=stand_waps, test=stand_waps_val, cl=sample$BUILDINGID, k=5)
+confusionMatrix(knn_class, validationData6$BUILDINGID)
 
-# transform the waps using the parameters
-stand_waps <- predict(preprocessParams, sample[WAPs])
-
-# complete dataset
-stand_dataset<-cbind(stand_waps, BUILDINGID=sample$BUILDINGID,LONGITUDE=sample$LONGITUDE)
-
-# Train two classification knn (with knn3 and train)
-system.time(knn_clasif <- knn3(BUILDINGID ~ as.matrix(stand_dataset[WAPs]), data = stand_dataset))
-
-system.time(knn_clasif_caret<-train(y=stand_dataset$BUILDINGID, x=stand_dataset[WAPs], data = stand_dataset, method="knn"))
-
-# Train two regression knn (with knnreg and caret)
-system.time(knn_reg<-knnreg(LONGITUDE ~ as.matrix(stand_dataset[WAPs]), data = stand_dataset))
-
-system.time(knn_reg_caret<-train(y=stand_dataset$LONGITUDE, x=stand_dataset[WAPs], data = stand_dataset, method="knn"))
-```
-#6.MODEL3: SVM: e1071 package
-Explore the main parameters of these functions svm() for classification and regression.
-
-Read this resource for more info svm() for classification and regression.
-
-Train two svm models with these packages and the caret package
-```{r}
-# Load the packages
 library(e1071)
-library(caret)
+#DIDN'T WORK WITH THE SAMPLE. DOING WITH THE FULL TRAINING SET
+svm_clasif <- svm(y = trainingData6$BUILDINGID, x=trainingData6[WAPs_training], scale=FALSE)
+svm_clasif
+predicted_buildingSVM<-predict(svm_clasif,validationData6)
+postResample(pred = predicted_buildingSVM,obs=validationData6$BUILDINGID)
+confusionMatrix(predicted_buildingSVM, validationData6$BUILDINGID)
 
-# Saving the waps in a vector
-WAPs<-grep("WAP", names(sample), value=T)
+library(e1071)
 
-# Train two classification svm (with svm and train)
-system.time(svm_clasif <- svm(y = stand_dataset$BUILDINGID, x=stand_dataset[WAPs]))
+svm_clasif <- svm(y = trainingData6$BUILDINGID, x=trainingData6[WAPs_training], scale=FALSE)
+svm_clasif
+predicted_buildingSVM<-predict(svm_clasif,validationData6)
+postResample(pred = predicted_buildingSVM,obs=validationData6$BUILDINGID)
+confusionMatrix(predicted_buildingSVM, validationData6$BUILDINGID)
 
-system.time(svm_clasif_caret<-train(y=stand_dataset$BUILDINGID, x=stand_dataset[WAPs], data = stand_dataset, method="svmLinear"))
+```
 
-# Train two regression svm (with svm and train)
-system.time(svm_reg <- svm(y = stand_dataset$LONGITUDE, x=stand_dataset[WAPs]))
+#5. CHANGE COLUMN NAMES IN THE VALIDATION DATA & ADD IN BUILDING PREDICTIONS
+```{r}
 
-system.time(svm_reg_caret<-train(y=stand_dataset$LONGITUDE, x=as.matrix(stand_dataset[WAPs], data = stand_dataset, method="svmLinear")))
+names(validationData6)[names(validationData6)=="BUILDINGID"] <- "original_building"
+
+A<-BUILDRF[,1]
+
+validationData6 <- cbind(validationData6, A)
+
+
+names(validationData6)[names(validationData6)=="A"] <- "BUILDINGID"
+
+
+```
+
+#6. DIVIDE TRAINING & VALIDATION DATASETS INTO THREE - ONE FOR EACH BUILDING
+```{r}
+#Training
+trainingDataBuilding0 <- trainingData6%>%
+  filter(BUILDINGID==0 & FLOOR !=4)
+
+trainingDataBuilding0$FLOOR <- as.character(trainingDataBuilding0$FLOOR)
+trainingDataBuilding0$FLOOR <- as.factor(trainingDataBuilding0$FLOOR)
+
+trainingDataBuilding0$BUILDINGID <- as.character(trainingDataBuilding0$BUILDINGID)
+trainingDataBuilding0$BUILDINGID<- as.factor(trainingDataBuilding0$BUILDINGID)
+
+#CHANGE FLOOR TO CHARACTER AND THEN BACK TO FACTOR AGAIN
+
+trainingDataBuilding1 <- trainingData6%>%
+  filter(BUILDINGID==1 & FLOOR !=4)
+
+trainingDataBuilding1$FLOOR <- as.character(trainingDataBuilding1$FLOOR)
+trainingDataBuilding1$FLOOR <- as.factor(trainingDataBuilding1$FLOOR)
+
+trainingDataBuilding1$BUILDINGID <- as.character(trainingDataBuilding1$BUILDINGID)
+trainingDataBuilding1$BUILDINGID<- as.factor(trainingDataBuilding1$BUILDINGID)
+
+trainingDataBuilding2 <- trainingData6%>%
+  filter(BUILDINGID==2)
+trainingDataBuilding2$BUILDINGID <- as.character(trainingDataBuilding2$BUILDINGID)
+trainingDataBuilding2$BUILDINGID<- as.factor(trainingDataBuilding2$BUILDINGID)
+
+#Validation
+validationDataBuilding0<-validationData6%>%
+  filter(BUILDINGID==0 & FLOOR !=4)
+
+validationDataBuilding0$FLOOR <- as.character(validationDataBuilding0$FLOOR)
+validationDataBuilding0$FLOOR <- as.factor(validationDataBuilding0$FLOOR)
+
+
+validationDataBuilding1<-validationData6%>%
+  filter(BUILDINGID==1 & FLOOR !=4)
+
+validationDataBuilding1$FLOOR <- as.character(validationDataBuilding1$FLOOR)
+validationDataBuilding1$FLOOR <- as.factor(validationDataBuilding1$FLOOR)
+
+
+validationDataBuilding2<-validationData6%>%
+  filter(BUILDINGID==2)
+
+```
+
+#7 PREDICT FLOOR
+#7.1 Building 0
+```{r}
+#Save WAPs in a vector
+WAPs_training<-grep("WAP", names(trainingDataBuilding0), value=T)
+
+# Get the best mtry
+bestmtry_rf<-tuneRF(trainingDataBuilding0[WAPs_training], trainingDataBuilding0$FLOOR, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+B0training.h2o <- as.h2o(trainingDataBuilding0)
+B0test.h2o <- as.h2o(validationDataBuilding0)
+
+
+#Train a random forest using that mtry y=BUILDING ID
+y.dep <-433
+x.indep <- c(1:430)
+rf_h2o_B0<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = B0training.h2o,ntree=100, mtries=40, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o_B0)
+varImp <- h2o.varimp(rf_h2o_B0)
+predicted_floorB0_rf<-as.data.frame(h2o.predict(rf_h2o_B0, B0test.h2o))
+postResample(predicted_floorB0_rf, validationDataBuilding0$FLOOR)
+
+h2o.confusionMatrix(predicted_floorB0_rf, validationDataBuilding0$FLOOR)
+
+#GRADIENT BOOSTED MACHINE
+gbm_h2o_B0 <- h2o.gbm(y=y.dep, x=x.indep, training_frame = B0training.h2o, ntrees = 100, max_depth = 4, learn_rate = 0.01, seed = 1122)
+h2o.performance(gbm_h2o_B0)
+varImp <- h2o.varimp(gbm_h2o_B0)
+predicted_floorB0_gbm<-as.data.frame(h2o.predict(gbm_h2o_B0, B0test.h2o))
+postResample(predicted_floorB0_gbm, validationDataBuilding0$FLOOR)
+
+h2o.confusionMatrix(predicted_floorB0_gbm, validationDataBuilding0$FLOOR)
+
+#RANDOM FOREST - WORKING
+rf_reg_caret<-train(y=trainingDataBuilding0$FLOOR, x=trainingDataBuilding0[WAPs_training], method="rf", ntree=100,tuneGrid=expand.grid(.mtry=40))
+
+predicted_floorRF<-predict(rf_reg_caret,validationDataBuilding0)
+postResample(pred =predicted_floorRF,obs=validationDataBuilding0$FLOOR)
+confusionMatrix(predicted_floorRF, validationDataBuilding0$FLOOR)
+
+#KNN - WORKING
+
+library(class)
+preprocessParams <- preProcess(trainingDataBuilding0[WAPs_training], method=c("center", "scale"))
+
+
+stand_waps <- predict(preprocessParams, trainingDataBuilding0[WAPs_training])
+
+stand_waps_val <- predict(preprocessParams, validationDataBuilding0[WAPs_training])
+
+
+knn_class <- knn(train=stand_waps, test=stand_waps_val, cl=trainingDataBuilding0$FLOOR, k=5)
+confusionMatrix(knn_class, validationDataBuilding0$FLOOR)
+
+#SVM
+library(e1071)
+
+svm_clasif <- svm(y = trainingDataBuilding0$FLOOR, x=trainingDataBuilding0[WAPs_training], scale=FALSE)
+svm_clasif
+predicted_floorsSVM<-predict(svm_clasif,validationDataBuilding0)
+postResample(pred = predicted_floorsSVM,obs=validationDataBuilding0$FLOOR)
+confusionMatrix(predicted_floorsSVM, validationDataBuilding0$FLOOR)
+
+
+```
+
+#7.2 Building 1
+```{r}
+# Get the best mtry
+bestmtry_rf<-tuneRF(trainingDataBuilding1[WAPs_training], trainingDataBuilding1$FLOOR, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+B1training.h2o <- as.h2o(trainingDataBuilding1)
+B1test.h2o <- as.h2o(validationDataBuilding1)
+
+
+#Train a random forest using that mtry y=BUILDING ID
+y.dep <-433
+x.indep <- c(1:430)
+rf_h2o_B1<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = B1training.h2o,ntree=100, mtries=40, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o_B1)
+varImp <- h2o.varimp(rf_h2o_B1)
+predicted_floorB1_rf<-as.data.frame(h2o.predict(rf_h2o_B1, B1test.h2o))
+postResample(predicted_floorB1_rf, validationDataBuilding1$FLOOR)
+
+h2o.confusionMatrix(predicted_floorB0_rf, validationDataBuilding1$FLOOR)
+
+#GRADIENT BOOSTED MACHINE
+gbm_h2o_B1 <- h2o.gbm(y=y.dep, x=x.indep, training_frame = B1training.h2o, ntrees = 100, max_depth = 4, learn_rate = 0.01, seed = 1122)
+h2o.performance(gbm_h2o_B1)
+varImp <- h2o.varimp(gbm_h2o_B1)
+predicted_floorB1_gbm<-as.data.frame(h2o.predict(gbm_h2o_B1, B1test.h2o))
+postResample(predicted_floorB1_gbm, validationDataBuilding1$FLOOR)
+
+h2o.confusionMatrix(predicted_floorB1_gbm, validationDataBuilding1$FLOOR)
+
+#RANDOM FOREST - WORKING
+rf_reg_caret<-train(y=trainingDataBuilding1$FLOOR, x=trainingDataBuilding1[WAPs_training], method="rf", ntree=100,tuneGrid=expand.grid(.mtry=80))
+
+predicted_floor<-predict(rf_reg_caret,validationDataBuilding1)
+postResample(pred =predicted_floor,obs=validationDataBuilding1$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding1$FLOOR)
+
+#KNN - WORKING
+
+library(class)
+preprocessParams <- preProcess(trainingDataBuilding1[WAPs_training], method=c("center", "scale"))
+
+
+stand_waps <- predict(preprocessParams, trainingDataBuilding1[WAPs_training])
+
+stand_waps_val <- predict(preprocessParams, validationDataBuilding1[WAPs_training])
+
+
+knn_class <- knn(train=stand_waps, test=stand_waps_val, cl=trainingDataBuilding1$FLOOR, k=5)
+confusionMatrix(knn_class, validationDataBuilding1$FLOOR)
+
+#SVM
+library(e1071)
+
+svm_clasif <- svm(y = trainingDataBuilding1$FLOOR, x=trainingDataBuilding1[WAPs_training], scale=FALSE)
+svm_clasif
+predicted_floor<-predict(svm_clasif,validationDataBuilding1)
+postResample(pred = predicted_floor,obs=validationDataBuilding1$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding1$FLOOR)
+
+
+
+
+```
+
+#7.3 Building 2
+```{r}
+# Get the best mtry
+bestmtry_rf<-tuneRF(trainingDataBuilding2[WAPs_training], trainingDataBuilding2$FLOOR, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+B2training.h2o <- as.h2o(trainingDataBuilding2)
+B2test.h2o <- as.h2o(validationDataBuilding2)
+
+
+#Train a random forest using that mtry y=BUILDING ID
+y.dep <-433
+x.indep <- c(1:430)
+rf_h2o_B2<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = B2training.h2o,ntree=100, mtries=20, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o_B2)
+varImp <- h2o.varimp(rf_h2o_B2)
+predicted_floorB2_rf<-as.data.frame(h2o.predict(rf_h2o_B2, B2test.h2o))
+postResample(predicted_floorB2_rf, validationDataBuilding2$FLOOR)
+
+h2o.confusionMatrix(predicted_floorB2_rf, validationDataBuilding2$FLOOR)
+
+#GRADIENT BOOSTED MACHINE
+gbm_h2o_B2 <- h2o.gbm(y=y.dep, x=x.indep, training_frame = B2training.h2o, ntrees = 100, max_depth = 4, learn_rate = 0.01, seed = 1122)
+h2o.performance(gbm_h2o_B2)
+varImp <- h2o.varimp(gbm_h2o_B2)
+predicted_floorB2_gbm<-as.data.frame(h2o.predict(gbm_h2o_B2, B2test.h2o))
+postResample(predicted_floorB2_gbm, validationDataBuilding2$FLOOR)
+
+h2o.confusionMatrix(predicted_floorB2_gbm, validationDataBuilding2$FLOOR)
+
+
+#RANDOM FOREST - WORKING
+rf_reg_caret<-train(y=trainingDataBuilding2$FLOOR, x=trainingDataBuilding2[WAPs_training], method="rf", ntree=100,tuneGrid=expand.grid(.mtry=20))
+
+predicted_floor<-predict(rf_reg_caret,validationDataBuilding2)
+postResample(pred =predicted_floor,obs=validationDataBuilding2$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding2$FLOOR)
+
+#KNN - WORKING
+
+library(class)
+preprocessParams <- preProcess(trainingDataBuilding2[WAPs_training], method=c("center", "scale"))
+
+
+stand_waps <- predict(preprocessParams, trainingDataBuilding2[WAPs_training])
+
+stand_waps_val <- predict(preprocessParams, validationDataBuilding2[WAPs_training])
+
+
+knn_class <- knn(train=stand_waps, test=stand_waps_val, cl=trainingDataBuilding2$FLOOR, k=5)
+confusionMatrix(knn_class, validationDataBuilding2$FLOOR)
+
+#SVM
+library(e1071)
+
+svm_clasif <- svm(y = trainingDataBuilding2$FLOOR, x=trainingDataBuilding2[WAPs_training], scale=FALSE)
+svm_clasif
+predicted_floor<-predict(svm_clasif,validationDataBuilding2)
+postResample(pred = predicted_floor,obs=validationDataBuilding2$FLOOR)
+confusionMatrix(predicted_floor, validationDataBuilding2$FLOOR)
+
+```
+
+#8.CHANGE "FLOOR" IN  VALIDATION SETS FOR EACH BUILDING
+```{r}
+
+#BUILDING 0
+names(validationDataBuilding0)[names(validationDataBuilding0)=="FLOOR"] <- "original_floor"
+A<-predicted_floorB0_rf[,1]
+validationDataBuilding0 <- cbind(validationDataBuilding0, A)
+names(validationDataBuilding0)[names(validationDataBuilding0)=="A"] <- "FLOOR"
+
+#BUILDING1
+names(validationDataBuilding1)[names(validationDataBuilding1)=="FLOOR"] <- "original_floor"
+A<-predicted_floorB1_rf[,1]
+validationDataBuilding1 <- cbind(validationDataBuilding1, A)
+names(validationDataBuilding1)[names(validationDataBuilding1)=="A"] <- "FLOOR"
+
+#BUILDING2
+names(validationDataBuilding2)[names(validationDataBuilding2)=="FLOOR"] <- "original_floor"
+A<-predicted_floorB2_gbm[,1]
+validationDataBuilding2 <- cbind(validationDataBuilding2, A)
+names(validationDataBuilding2)[names(validationDataBuilding2)=="A"] <- "FLOOR"
+
+```
+
+#9. PREDICT LONGITUDE
+#9.1 Building 0
+```{r}
+
+A<-grep("WAP|FLOOR", names(trainingDataBuilding0), value=T)
+bestmtry_rf<-tuneRF(x=trainingDataBuilding0[A], y=trainingDataBuilding0$LONGITUDE, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+bestmtry_rf
+#RANDOM FOREST
+B0training.h2o <- as.h2o(trainingDataBuilding0)
+B0test.h2o <- as.h2o(validationDataBuilding0)
+
+
+#Train a random forest using that mtry y=BUILDING ID
+y.dep <-431
+x.indep <- c(1:430,433)
+rf_h2o_B0<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = B0training.h2o,ntree=100, mtries=143, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o_B0)
+varImp <- h2o.varimp(rf_h2o_B0)
+predicted_longB0_rf<-as.data.frame(h2o.predict(rf_h2o_B0, B0test.h2o))
+postResample(predicted_longB0_rf, validationDataBuilding0$LONGITUDE)
+
 ```
 
 
