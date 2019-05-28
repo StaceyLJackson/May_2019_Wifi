@@ -23,6 +23,8 @@ if(require("pacman")=="FALSE"){
                  plotly, padr, lubridate, forecast,zoo,htmltools, readr,h2o)
 }
 
+devtools::install_github('cran/ggplot2')
+
 h2o.init(nthreads=-1)
 
 #Upload the files
@@ -39,7 +41,7 @@ validationData<-read.csv(file="/Users/staceyjackson/Dropbox (Personal)/Ubiqum/Ma
 
 #Look at the classes
 #str(trainingData)
-sapply(trainingData, class)
+#sapply(trainingData, class)
 
 
 #change 523-528 to factors - relative position, USERID, PHONEID, BUILDING ID
@@ -47,7 +49,7 @@ columns <- c(523:528)
 trainingData[,columns] <- lapply(trainingData[,columns], as.factor)
 validationData[,columns]<-lapply(validationData[,columns],as.factor)
 
-sapply(trainingData,class)
+#sapply(trainingData,class)
 
 
 #change time to POSixt
@@ -77,7 +79,7 @@ p <- ggplot(data=trainingData, mapping=aes(x=USERID, y=BUILDINGID))
 p + geom_point()
 
 #plot of all three buildings' longitude & latitude showing each floor
-P<-ggplot(trainingData, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
+P<-ggplot(trainingData, mapping=aes(x=LONGITUDE, y=LATITUDE))
 P+geom_point()
 
 
@@ -98,7 +100,19 @@ P+geom_point()
 #P<-ggplot(trainingDataBuilding2, mapping=aes(x=LONGITUDE, y=LATITUDE, colour=FLOOR))
 #P+geom_point()
 
+a <- htmltools::tagList()    
+for(i in unique(trainingData$BUILDINGID)){
+a[[i]] <- trainingData %>% dplyr:: filter(BUILDINGID == i) %>% plot_ly(type = "scatter3d",
+       x = ~ LATITUDE,
+       y = ~ LONGITUDE,
+       z = ~ FLOOR,
+       mode = 'markers')
 
+
+}  
+a[[1]]
+a[[2]]
+a[[3]]
 ```
 
 #1.3. Delete WAPs with a mean of 100
@@ -560,6 +574,41 @@ h2o.performance(gbm_h2o_B0)
 varImp <- h2o.varimp(gbm_h2o_B0)
 predicted_longB0_gbm<-as.data.frame(h2o.predict(gbm_h2o_B0, B0test.h2o))
 postResample(predicted_longB0_gbm, validationDataBuilding0$LONGITUDE)
+
+predictedValues <- predicted_longB0_rf
+actualValues <- validationDataBuilding0$LONGITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+square_error <- absoluteError * absoluteError
+
+#PLOTS OF THE ERRORS
+
+plot(actualValues, absoluteError)
+plot(actualValues,square_error)
+
+p<-ggplot(data=validationDataBuilding0, aes(x=LONGITUDE, y=absoluteError, color=LONGITUDE))
+p+geom_point() +
+  labs(x="Longitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding0, aes(x=LONGITUDE, y=square_error, color=LONGITUDE))
+p+geom_point() +
+  labs(x="Longitude", y= "Square Errors", title = "Test set: square errors")
+
+p<-ggplot(data=validationDataBuilding0, aes(x=LONGITUDE, y=absoluteError, color=LONGITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Longitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding0, aes(x=LONGITUDE, y=square_error, color=LONGITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Longitude", y= "Square Errors", title = "Test set: square errors")
+
+ggplot(validationDataBuilding0, aes(x = absoluteError)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding0, aes(x = square_error)) +
+        geom_histogram(aes(y = ..count..))
 ```
 #9.2 Building 1
 ```{r}
@@ -588,6 +637,40 @@ h2o.performance(gbm_h2o_B1)
 varImp <- h2o.varimp(gbm_h2o_B1)
 predicted_longB1_gbm<-as.data.frame(h2o.predict(gbm_h2o_B1, B1test.h2o))
 postResample(predicted_longB1_gbm, validationDataBuilding1$LONGITUDE)
+
+predictedValues <- predicted_longB1_rf
+actualValues <- validationDataBuilding1$LONGITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+square_error <- absoluteError * absoluteError
+#PLOTS OF THE ERRORS
+
+plot(actualValues, absoluteError)
+plot(actualValues,square_error)
+
+p<-ggplot(data=validationDataBuilding1, aes(x=LONGITUDE, y=absoluteError, color=LONGITUDE))
+p+geom_point() +
+  labs(x="Longitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding1, aes(x=LONGITUDE, y=square_error, color=LONGITUDE))
+p+geom_point() +
+  labs(x="Longitude", y= "Square Errors", title = "Test set: square errors")
+
+p<-ggplot(data=validationDataBuilding1, aes(x=LONGITUDE, y=absoluteError, color=LONGITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Longitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding1, aes(x=LONGITUDE, y=square_error, color=LONGITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Longitude", y= "Square Errors", title = "Test set: square errors")
+
+ggplot(validationDataBuilding1, aes(x = absoluteError)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding1, aes(x = square_error)) +
+        geom_histogram(aes(y = ..count..))
 ```
 #9.2 Building 2
 ```{r}
@@ -616,6 +699,43 @@ h2o.performance(gbm_h2o_B2)
 varImp <- h2o.varimp(gbm_h2o_B2)
 predicted_longB2_gbm<-as.data.frame(h2o.predict(gbm_h2o_B2, B2test.h2o))
 postResample(predicted_longB2_gbm, validationDataBuilding2$LONGITUDE)
+
+#PLOTS OF THE ERRORS
+
+predictedValues <- predicted_longB2_rf
+actualValues <- validationDataBuilding2$LONGITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+square_error <- absoluteError * absoluteError
+
+
+
+plot(actualValues, absoluteError)
+plot(actualValues,square_error)
+
+p<-ggplot(data=validationDataBuilding2, aes(x=LONGITUDE, y=absoluteError, color=LONGITUDE))
+p+geom_point() +
+  labs(x="Longitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding2, aes(x=LONGITUDE, y=square_error, color=LONGITUDE))
+p+geom_point() +
+  labs(x="Longitude", y= "Square Errors", title = "Test set: square errors")
+
+p<-ggplot(data=validationDataBuilding2, aes(x=LONGITUDE, y=absoluteError, color=LONGITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Longitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding2, aes(x=LONGITUDE, y=square_error, color=LONGITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Longitude", y= "Square Errors", title = "Test set: square errors")
+
+ggplot(validationDataBuilding2, aes(x = absoluteError)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding2, aes(x = square_error)) +
+        geom_histogram(aes(y = ..count..))
 ```
 #10.CHANGE "LONGITUDE" IN  VALIDATION SETS FOR EACH BUILDING
 ```{r}
@@ -667,6 +787,46 @@ h2o.performance(gbm_h2o_B0)
 varImp <- h2o.varimp(gbm_h2o_B0)
 predicted_latB0_gbm<-as.data.frame(h2o.predict(gbm_h2o_B0, B0test.h2o))
 postResample(predicted_latB0_gbm, validationDataBuilding0$LATITUDE)
+
+predictedValues <- predicted_latB0_gbm
+actualValues <- validationDataBuilding0$LATITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+square_error <- absoluteError * absoluteError
+
+
+
+plot(actualValues, absoluteError)
+plot(actualValues,square_error)
+
+p<-ggplot(data=validationDataBuilding0, aes(x=LATITUDE, y=absoluteError, color=LATITUDE))
+p+geom_point() +
+  labs(x="Latitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding0, aes(x=LATITUDE, y=square_error, color=LATITUDE))
+p+geom_point() +
+  labs(x="Latitude", y= "Square Errors", title = "Test set: square errors")
+
+p<-ggplot(data=validationDataBuilding0, aes(x=LATITUDE, y=absoluteError, color=LATITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Latitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding0, aes(x=LATITUDE, y=square_error, color=LATITUDE))
+p+geom_smooth(method = "loess") +
+ # scale_x_log10() +
+  labs(x="Latitude", y= "Square Errors", title = "Test set: square errors")
+
+ggplot(validationDataBuilding0, aes(x = absoluteError)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding0, aes(x = square_error)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding0, mapping=aes(x=LONGITUDE, y=LATITUDE)) +
+geom_point(mapping = aes(color = absoluteError))
+
+
 ```
 #11.2 Building 1
 ```{r}
@@ -695,6 +855,44 @@ h2o.performance(gbm_h2o_B1)
 varImp <- h2o.varimp(gbm_h2o_B1)
 predicted_latB1_gbm<-as.data.frame(h2o.predict(gbm_h2o_B1, B1test.h2o))
 postResample(predicted_latB1_gbm, validationDataBuilding1$LATITUDE)
+
+predictedValues <- predicted_latB1_gbm
+actualValues <- validationDataBuilding1$LATITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+square_error <- absoluteError * absoluteError
+
+
+
+plot(actualValues, absoluteError)
+plot(actualValues,square_error)
+
+p<-ggplot(data=validationDataBuilding1, aes(x=LATITUDE, y=absoluteError, color=LATITUDE))
+p+geom_point() +
+  labs(x="Latitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding1, aes(x=LATITUDE, y=square_error, color=LATITUDE))
+p+geom_point() +
+  labs(x="Latitude", y= "Square Errors", title = "Test set: square errors")
+
+p<-ggplot(data=validationDataBuilding1, aes(x=LATITUDE, y=absoluteError, color=LATITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Latitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding1, aes(x=LATITUDE, y=square_error, color=LATITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Latitude", y= "Square Errors", title = "Test set: square errors")
+
+ggplot(validationDataBuilding1, aes(x = absoluteError)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding1, aes(x = square_error)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding1, mapping=aes(x=LONGITUDE, y=LATITUDE)) +
+geom_point(mapping = aes(color = absoluteError))
 ```
 #11.3 Building 2
 ```{r}
@@ -724,5 +922,67 @@ varImp <- h2o.varimp(gbm_h2o_B2)
 predicted_latB2_gbm<-as.data.frame(h2o.predict(gbm_h2o_B2, B2test.h2o))
 errors <- postResample(predicted_latB2_gbm, validationDataBuilding2$LATITUDE)
 
+predictedValues <- predicted_latB2_gbm
+actualValues <- validationDataBuilding2$LATITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+square_error <- absoluteError * absoluteError
+
+
+
+plot(actualValues, absoluteError)
+plot(actualValues,square_error)
+
+p<-ggplot(data=validationDataBuilding2, aes(x=LATITUDE, y=absoluteError, color=LATITUDE))
+p+geom_point() +
+  labs(x="Latitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding2, aes(x=LATITUDE, y=square_error, color=LATITUDE))
+p+geom_point() +
+  labs(x="Latitude", y= "Square Errors", title = "Test set: square errors")
+
+p<-ggplot(data=validationDataBuilding2, aes(x=LATITUDE, y=absoluteError, color=LATITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Latitude", y= "Absolute Errors", title = "Test set: absolute errors")
+
+p<-ggplot(data=validationDataBuilding2, aes(x=LATITUDE, y=square_error, color=LATITUDE))
+p+geom_smooth(method = "loess") +
+  #scale_x_log10() +
+  labs(x="Latitude", y= "Square Errors", title = "Test set: square errors")
+
+p<-ggplot(data=validationDataBuilding2, aes(x=square_error))
+p+geom_histogram()
+
+ggplot(validationDataBuilding2, aes(x = absoluteError)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding2, aes(x = square_error)) +
+        geom_histogram(aes(y = ..count..))
+
+ggplot(validationDataBuilding2, mapping=aes(x=LONGITUDE, y=LATITUDE)) +
+geom_point(mapping = aes(color = absoluteError))
+
+a <- htmltools::tagList()    
+for(i in unique(validationDataBuilding2$LATITUDE)){
+a[[i]] <- trainingData %>% dplyr:: filter(LATITUDE == i) %>% plot_ly(type = "scatter3d",
+       x = ~ LATITUDE,
+       y = ~ LONGITUDE,
+       z = ~ absoluteError,
+       mode = 'markers')
+
+
+}  
+a[[1]]
+a[[2]]
+a[[3]]
+```
+#12.FIND THE OUTLIERS IN BUILDING 2
+```{r}
+validationDataBuilding2$outliers<- validationDataBuilding2 %>%
+  filter(LATITUDE == 4864800)
+
+outliers <- validationDataBuilding2 %>% group_by(LATITUDE, LONGITUDE) %>% summarise(LATITUDE>4864800)
 
 ```
+
