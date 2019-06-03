@@ -341,14 +341,7 @@ actualValues <- validationDataBuilding0$FLOOR
 validationDataBuilding0$absoluteError <- abs(predictedValues$predict - actualValues)
 
 
-ggplot(validationDataBuilding0, aes(x = absoluteError)) +
-        geom_histogram(aes(y = ..count..))
 
-validationDataBuilding0$errorType<-ifelse(validationDataBuilding0$absoluteError<25,"low",
-                                          ifelse(validationDataBuilding0$absoluteError>=25 & validationDataBuilding0$absoluteError<50, "medium", "high"))
-
-ggplot(validationDataBuilding0, mapping=aes(x=original_floor, y=BUILDINGID)) +
-  geom_point(mapping = aes(color = errorType))
 
 
 
@@ -447,18 +440,31 @@ names(validationDataBuilding2)[names(validationDataBuilding2)=="FLOOR"] <- "orig
 A<-predicted_floorB2_gbm$predict
 validationDataBuilding2 <- cbind(validationDataBuilding2, A)
 names(validationDataBuilding2)[names(validationDataBuilding2)=="A"] <- "FLOOR"
-
 ```
-PLOTS OF ERRORS FOR FLOORS
+#FLOOR ERROR PLOT
 ```{r}
 
 
-plot(validationDataBuilding2$original_floor,validationDataBuilding2$FLOOR)
+
+validationDataBuilding0$classification<-ifelse(predicted_floorB0_rf$predict== validationDataBuilding0$original_floor ,"correct", "wrong")
+
+ggplot(validationDataBuilding0, aes(x = original_floor, y= predicted_floorB0_rf$predict, color = classification))+
+  geom_jitter() +xlab("Original Floor") +ylab("Predicted Floor")
+
+validationDataBuilding1$classification<-ifelse(predicted_floorB1_rf$predict== validationDataBuilding1$original_floor ,"correct", "wrong")
+
+ggplot(validationDataBuilding1, aes(x = original_floor, y= predicted_floorB1_rf$predict, color = classification))+
+  geom_jitter() +xlab("Original Floor") +ylab("Predicted Floor")
+
+validationDataBuilding2$classification<-ifelse(predicted_floorB2_rf$predict== validationDataBuilding2$original_floor ,"correct", "wrong")
+
+ggplot(validationDataBuilding2, aes(x = original_floor, y= predicted_floorB2_rf$predict, color = classification))+
+  geom_jitter() +xlab("Original Floor") +ylab("Predicted Floor")
 
 
-
-
+plot_ly(data=validationDataBuilding0, x = ~ original_floor, y = ~ predicted_floorB0_rf$predict, color = ~ classification)
 ```
+
 
 #9. PREDICT LONGITUDE
 #9.1 Building 0
@@ -499,7 +505,7 @@ absoluteError <- predictedValues$predict - actualValues
 
 
 
-ggplot(validationDataBuilding0, aes(x = absoluteError)) +
+#ggplot(validationDataBuilding0, aes(x = absoluteError)) +
         geom_histogram(aes(y = ..count..))
 
 
@@ -543,7 +549,7 @@ absoluteError <- predictedValues$predict - actualValues
 
 
 
-ggplot(validationDataBuilding1, aes(x = absoluteError)) +
+#ggplot(validationDataBuilding1, aes(x = absoluteError)) +
         geom_histogram(aes(y = ..count..))
 
 
@@ -584,7 +590,7 @@ actualValues <- validationDataBuilding2$LONGITUDE
 absoluteError <- predictedValues$predict - actualValues
 
 
-ggplot(validationDataBuilding2, aes(x = absoluteError)) +
+#ggplot(validationDataBuilding2, aes(x = absoluteError)) +
         geom_histogram(aes(y = ..count..))
 
 
@@ -655,11 +661,13 @@ ggplot(validationDataBuilding0, aes(x = absoluteError)) +
 validationDataBuilding0$errorType<-ifelse(validationDataBuilding0$absoluteError<25,"low",
                                           ifelse(validationDataBuilding0$absoluteError>=25 & validationDataBuilding0$absoluteError<50, "medium", "high"))
 
-ggplot(validationDataBuilding0, mapping=aes(x=original_long, y=LATITUDE)) +
+#ggplot(validationDataBuilding0, mapping=aes(x=original_long, y=LATITUDE)) +
   geom_point(mapping = aes(color = errorType))
 
 
-plot_ly(data=validationDataBuilding1, x = ~ original_long, y = ~ LATITUDE, color = ~ errorType)
+plot_ly(data=validationDataBuilding0, x = ~ original_long, y = ~ LATITUDE, color = ~ errorType)
+
+plot_ly(data=validationDataBuilding0, x = ~ BUILDINGID, y = ~ original_floor, color = ~ errorType)
 
 
 ```
@@ -763,11 +771,195 @@ plot_ly(data=validationDataBuilding2, x = ~ original_long, y = ~ LATITUDE, color
 outlier <- validationDataBuilding2%>%
   filter(original_long <(-7550))
 outlier
-  
+
+plot_ly(data=validationDataBuilding2, x = ~ BUILDINGID, y = ~ FLOOR, color = ~ errorType)
+
+
+
 ```
+#12. PREDICT LONGITUDE with just the waps
+#12.1 Building 0
+```{r}
+A<-grep("WAP", names(trainingDataBuilding0), value=T)
+
+bestmtry_rf<-tuneRF(x=trainingDataBuilding0[A], y=trainingDataBuilding0$LONGITUDE, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+B0training.h2o <- as.h2o(trainingDataBuilding0)
+B0test.h2o <- as.h2o(validationDataBuilding0)
+
+
+#Train a random forest using that mtry 
+y.dep <-431
+x.indep <- c(1:430,433)
+rf_h2o_B0<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = B0training.h2o,ntree=100, mtries=185, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o_B0)
+varImp <- h2o.varimp(rf_h2o_B0)
+predicted_longB0_rf<-as.data.frame(h2o.predict(rf_h2o_B0, B0test.h2o))
+postResample(predicted_longB0_rf, validationDataBuilding0$LONGITUDE)
+
+#GRADIENT BOOSTED MACHINE
+gbm_h2o_B0 <- h2o.gbm(y=y.dep, x=x.indep, training_frame = B0training.h2o, ntrees = 100, max_depth = 4, learn_rate = 0.01, seed = 1122)
+h2o.performance(gbm_h2o_B0)
+varImp <- h2o.varimp(gbm_h2o_B0)
+predicted_longB0_gbm<-as.data.frame(h2o.predict(gbm_h2o_B0, B0test.h2o))
+postResample(predicted_longB0_gbm, validationDataBuilding0$LONGITUDE)
+
+predictedValues <- predicted_longB0_rf
+actualValues <- validationDataBuilding0$LONGITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+
+
+#PLOTS OF THE ERRORS
+
+#ggplot(validationDataBuilding0, aes(x = absoluteError)) +
+       # geom_histogram(aes(y = ..count..))
+
+hist(absoluteError)
+```
+#12.2 Building 1
+```{r}
+A<-grep("WAP", names(trainingDataBuilding1), value=T)
+
+
+bestmtry_rf<-tuneRF(x=trainingDataBuilding1[A], y=trainingDataBuilding1$LONGITUDE, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+B1training.h2o <- as.h2o(trainingDataBuilding1)
+B1test.h2o <- as.h2o(validationDataBuilding1)
+
+
+#Train a random forest using that mtry 
+y.dep <-431
+x.indep <- c(1:430,433)
+rf_h2o_B1<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = B1training.h2o,ntree=100, mtries=72, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o_B1)
+varImp <- h2o.varimp(rf_h2o_B1)
+predicted_longB1_rf<-as.data.frame(h2o.predict(rf_h2o_B1, B1test.h2o))
+postResample(predicted_longB1_rf, validationDataBuilding1$LONGITUDE)
+
+#GRADIENT BOOSTED MACHINE
+gbm_h2o_B1 <- h2o.gbm(y=y.dep, x=x.indep, training_frame = B1training.h2o, ntrees = 100, max_depth = 4, learn_rate = 0.01, seed = 1122)
+h2o.performance(gbm_h2o_B1)
+varImp <- h2o.varimp(gbm_h2o_B1)
+predicted_longB1_gbm<-as.data.frame(h2o.predict(gbm_h2o_B1, B1test.h2o))
+postResample(predicted_longB1_gbm, validationDataBuilding1$LONGITUDE)
+
+predictedValues <- predicted_longB1_rf
+actualValues <- validationDataBuilding1$LONGITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+
+
+#PLOTS OF THE ERRORS
+
+#ggplot(validationDataBuilding0, aes(x = absoluteError)) +
+       # geom_histogram(aes(y = ..count..))
+
+hist(absoluteError)
+```
+
+#12.2 Building 2
+```{r}
+A<-grep("WAP", names(trainingDataBuilding2), value=T)
+
+
+bestmtry_rf<-tuneRF(x=trainingDataBuilding2[A], y=trainingDataBuilding2$LONGITUDE, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+B2training.h2o <- as.h2o(trainingDataBuilding2)
+B2test.h2o <- as.h2o(validationDataBuilding2)
+
+
+#Train a random forest using that mtry 
+y.dep <-431
+x.indep <- c(1:430,433)
+rf_h2o_B2<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = B2training.h2o,ntree=100, mtries=143, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o_B2)
+varImp <- h2o.varimp(rf_h2o_B2)
+predicted_longB2_rf<-as.data.frame(h2o.predict(rf_h2o_B2, B2test.h2o))
+postResample(predicted_longB2_rf, validationDataBuilding2$LONGITUDE)
+
+#GRADIENT BOOSTED MACHINE
+gbm_h2o_B2 <- h2o.gbm(y=y.dep, x=x.indep, training_frame = B2training.h2o, ntrees = 100, max_depth = 4, learn_rate = 0.01, seed = 1122)
+h2o.performance(gbm_h2o_B2)
+varImp <- h2o.varimp(gbm_h2o_B2)
+predicted_longB2_gbm<-as.data.frame(h2o.predict(gbm_h2o_B2, B2test.h2o))
+postResample(predicted_longB2_gbm, validationDataBuilding2$LONGITUDE)
+
+predictedValues <- predicted_longB2_rf
+actualValues <- validationDataBuilding2$LONGITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+
+
+#PLOTS OF THE ERRORS
+
+#ggplot(validationDataBuilding0, aes(x = absoluteError)) +
+       # geom_histogram(aes(y = ..count..))
+
+hist(absoluteError)
+```
+#13. PREDICT LATITUDE without floor or longitude
+#13.1 Building 0
+```{r}
+
+A<-grep("WAP", names(trainingDataBuilding0), value=T)
+
+bestmtry_rf<-tuneRF(x=trainingDataBuilding0[A], y=trainingDataBuilding0$LATITUDE, ntreeTry=100,stepFactor=2,improve=0.05,trace=TRUE, plot=T) 
+
+#RANDOM FOREST
+B0training.h2o <- as.h2o(trainingDataBuilding0)
+B0test.h2o <- as.h2o(validationDataBuilding0)
+
+
+#Train a random forest using that mtry 
+y.dep <-432
+x.indep <- c(1:431,433)
+rf_h2o_B0<-h2o.randomForest(y=y.dep,x=x.indep,training_frame = B0training.h2o,ntree=100, mtries=143, max_depth = 4,seed = 1122)
+h2o.performance(rf_h2o_B0)
+varImp <- h2o.varimp(rf_h2o_B0)
+predicted_latB0_rf<-as.data.frame(h2o.predict(rf_h2o_B0, B0test.h2o))
+postResample(predicted_latB0_rf, validationDataBuilding0$LATITUDE)
+
+#GRADIENT BOOSTED MACHINE
+gbm_h2o_B0 <- h2o.gbm(y=y.dep, x=x.indep, training_frame = B0training.h2o, ntrees = 100, max_depth = 4, learn_rate = 0.01, seed = 1122)
+h2o.performance(gbm_h2o_B0)
+varImp <- h2o.varimp(gbm_h2o_B0)
+predicted_latB0_gbm<-as.data.frame(h2o.predict(gbm_h2o_B0, B0test.h2o))
+postResample(predicted_latB0_gbm, validationDataBuilding0$LATITUDE)
+
+predictedValues <- predicted_latB0_rf
+actualValues <- validationDataBuilding0$LATITUDE
+
+absoluteError <- predictedValues$predict - actualValues
+
+
+validationDataBuilding0$absoluteError <- abs(predictedValues$predict - actualValues)
+
+
+ggplot(validationDataBuilding0, aes(x = absoluteError)) +
+        geom_histogram(aes(y = ..count..))
+
+validationDataBuilding0$errorType<-ifelse(validationDataBuilding0$absoluteError<25,"low",
+                                          ifelse(validationDataBuilding0$absoluteError>=25 & validationDataBuilding0$absoluteError<50, "medium", "high"))
+
+#ggplot(validationDataBuilding0, mapping=aes(x=original_long, y=LATITUDE)) +
+  geom_point(mapping = aes(color = errorType))
+
+
+plot_ly(data=validationDataBuilding0, x = ~ original_long, y = ~ LATITUDE, color = ~ errorType)
+
+plot_ly(data=validationDataBuilding0, x = ~ BUILDINGID, y = ~ original_floor, color = ~ errorType)
+
+hist(absoluteError)
+```
+#14. NORMALISE by row
 
 ```{r}
 
-
+#To normalize for each row, you can use apply and then subtract the minimum from each column and divide by the difference between maximum and minimum
+trainingData7 <- t(apply(trainingData6[,1:430], 1, function(x)(x-min(x))/(max(x)-min(x)))) 
 ```
 
